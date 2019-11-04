@@ -1,0 +1,202 @@
+<p style="background-color:#00b0f0; padding: 5px; margin: 3px auto; widows:3; orphans:3;"><span style="color:#ffffff;font-size: 24px; font-weight: bold;">配置单次任务at</span></p>
+​
+###  一、 任务描述
+​
+蜜罐是一种软件应用系统，用来称当入侵诱饵，引诱黑客前来攻击。攻击者入侵后，通过监测与分析，就可以知道他是如何入侵的，随时了解针对组织服务器发动的最新的攻击和漏洞。 当多个蜜罐被网络连接在一起时模拟一个大型网络，并利用其中一部分主机吸引黑客入侵，通过监测、观察入侵过程，一方面调查入侵者的来源，另一方面考察用于防护的安全措施是否有效。这种由多个蜜罐组成的模拟网络就称为蜜网。
+
+###  二、 任务目标
+​
+部署T-pot蜜罐平台并测试功能
+​
+###  三、 任务环境
+​
+vmware虚拟机软件 或 debian
+​
+###  四、 任务实施
+1.1 创建或安装镜像
+    在现有的debian系统上搭建T-pot
+        更换apt源
+            备份apt源
+            cp /etc/apt/sources.list /etc/apt/sources.list_bak_$(date +%F) 
+            
+            vim更改source.list文件内容
+            deb http://mirrors.163.com/debian/ sid main non-free contrib
+            deb-src http://mirrors.163.com/debian/ sid main non-free contrib
+            deb https://mirrors.tuna.tsinghua.edu.cn/debian/ sid main non-free contrib
+            deb-src https://mirrors.tuna.tsinghua.edu.cn/debian/ sid main non-free contrib
+            deb http://mirrors.ustc.edu.cn/debian/ sid main non-free contrib
+            deb-src http://mirrors.ustc.edu.cn/debian/ sid main non-free contrib
+            #deb http://ftp.sg.debian.org/debian/ sid main non-free contrib
+            #deb-src http://ftp.sg.debian.org/debian/ sid main non-free contrib
+            deb http://ftp.hk.debian.org/debian/ sid main non-free contrib
+            deb-src http://ftp.hk.debian.org/debian/ sid main non-free contrib " > /etc/apt/sources.list
+             
+            apt-get update
+            apt-get install curl git
+
+        安装apt-fast
+            apt-fast 加速包下载速度，通过aria2的多线程在多个镜像源中进行下载同一个文件,此步骤可忽略,install.sh会自动安装
+
+            apt-get install aria2 -y
+            git clone https://github.com/ilikenwf/apt-fast.git
+            cd apt-fast/
+            cp apt-fast /usr/bin/
+            cp apt-fast /usr/local/sbin/
+            chmod +x /usr/bin/apt-fast 
+            chmod +x /usr/local/sbin/
+            cp apt-fast.conf /etc
+            apt-fast update
+            sed -i "/^ *MIRRORS/d" /etc/apt-fast.conf
+            echo "MIRRORS=( 'http://mirrors.163.com/debian/,https://mirrors.tuna.tsinghua.edu.cn/debian/,http://mirrors.ustc.edu.cn/debian/' ) " >> /etc/apt-fast.conf
+             
+             
+            #后面看了下T-pot install脚本发现脚本内有下载apt-fast(所以可以不用自己下载apt-fast)😓
+            #此框命令可选执行，建议执行一遍用不了多久
+
+        配置npm源
+            apt-fast install npm
+            npm config set registry http://registry.npm.taobao.org 
+            
+        克隆Tpot
+            #这里指定克隆库到/opt/tpot,因为此版的install.sh中会到这个目录下读配置文件，不存在的话，会自动再从github clone一份
+            git clone https://github.com/dtag-dev-sec/tpotce /opt/tpot
+        
+        更改脚本
+            #发现脚本会将镜像源替换成官方源，需要将脚本中的替换命令删除，以下是19.03版本的删除命令:
+            sed -i '/^ *tee \/etc/d' install.sh
+            sed -i '/^ *deb/d' install.sh
+            sed -i "$(cat -n  install.sh | grep "EOF$" | awk '{print $1}' |  sed -n "1p")d"  install.sh
+            #以上三条命令不建议在非19.03版本运行，可能install脚本内容更改。
+             
+            sed -i "/^ *git clone https:\/\/github/d" install.sh #此条删除install.sh中克隆库到/opt/tpot前面已经克隆到这个目录所以删除
+             
+            #默认拉docker镜像的是国外的网站，总有几个镜像拉不动，配置加速会快很多
+            cd /opt/tpot/iso/installer
+            AA=$(cat -n install.sh | grep "myTPOTCOMPOSE"  | grep "for name in" | awk '{ print $1 }')
+            sed -i "${AA}i curl -sSL https://get.daocloud.io/daotools/set_mirror.sh | sh -s http://f1361db2.m.daocloud.io" install.sh
+            sed -i "${AA}a systemctl restart docker" install.sh
+             
+        安装
+            cd tpot/iso/installer/
+            ./install.sh --type=user
+
+            #如果中途退出执行install.sh，可能会报版本不支持错误，需要删除检测版本验证
+            sed -i "s/if \[ \"\$myLSB\" \!=.*/if \[ 1 \!= 1\]\;/" install.sh 
+
+            #github克隆速度慢的话可以尝试更改hosts文件
+            echo "13.229.188.59   github.com www.github.com
+            185.199.111.153 assets-cdn.github.com www.assets-cdn.github.com
+            151.101.228.249 global.ssl.fastly.net www.global.ssl.fastly.net" >> /etc/hosts
+
+    通过镜像安装
+        自己生成镜像(Debian 9.7或更新)
+            4GB可用RAM
+            32G磁盘空间
+            从github获取T-pot
+            git clone https://github.com/dtag-dev-sec/tpotce
+            cd tpotce
+            使用构建ISO脚本。该脚本将会下载并安装所需依赖项
+            ./makeiso.sh
+            #成功构建后，在目录会生成iso镜像tpot.iso以及tpot.sha256
+            在硬件上运行
+            将镜像烧录至U盘，进行安装
+            在虚拟机上运行
+
+        wmware安装现有镜像
+            wget https://github.com/dtag-dev-sec/tpotce/releases/download/19.03/tpot.iso
+            之后直接通过配置vmware安装就可以,跟安装ubuntu一样
+            一定要给虚拟机分配足够的内存
+            128G硬盘空间
+            6G内存空间
+            同时保证网络环境良好
+            安装时会让设置web用户的账户密码和默认tsec账户的密码 请记住
+
+2.1 检查安装  
+    检查Tpot服务
+        systemctl status tpot
+
+    检查容器
+        cd /opt/tpot/bin
+        ./dps.sh
+        #如果没有启动参考下面使用中的启动命令
+        #如果部分没有成功下载，可以手动下载下面的下载缺失容器
+        P为正常
+
+    下载缺失容器
+        cd /opt/tpot/etc/compose
+        for i in `cat ./standard.yml | grep image | cut -d '"' -f2 | uniq`
+        do 
+            docker pull $i
+        done
+·
+    启动容器
+        cd /opt/tpot/etc/compose
+        docker-compose -f ./standard.yml
+        #如果安装别的模式yml用相应版本的
+        #如果部分没有成功下载，可以手动下载
+     
+3.1 使用 
+    启动Tpot服务
+        systemctl start tpot
+
+    停止T-Pot服务
+        systemctl stop tpot
+    
+    选择关闭数据提交
+        默认情况，捕获的数据将提交给社区后端，并在 Sicherheitstacho 网站进行展现
+        实现这一功能需要我们开启代理连接到 Sicherheitstacho ，如果没有代理的话，数据提交失败，本地服务器默认不保存数据，就会导致入侵检测系统的失灵
+        所以如果没有设置代理的同学请务必关掉
+        1.停止T-Pot服务
+        systemctl stop tpot
+
+        2. 删除Ewsposter服务
+        vi /opt/tpot/etc/tpot.yml
+
+        3. 删除以下行，保存并退出
+        # Ewsposter service
+          ewsposter:
+            container_name: ewsposter
+            restart: always
+            networks:
+             - ewsposter_local
+            image: "dtagdevsec/ewsposter:1903"
+            volumes:
+             - /data:/data
+             - /data/ews/conf/ews.ip:/opt/ewsposter/ews.ip
+
+        4. 启动T-Pot服务
+        systemctl start tpot
+
+    选择加入HPFEEDS分享数据
+        现在可以与第三方HPFEEDS共享T-Pot数据提供额外的选项来提交攻击数据，例如SISSDEN。如果您想分享您的T-Pot数据，您只需在第三方经纪人处注册一个帐户，并为社区带来好处。注册后，您将收到您的凭证，以便与社区分
+
+        创建账户并申请凭证 https://portal.sissden.eu/profile
+
+        运行脚本
+
+        ./hpfreeds_option.sh 
+
+    系统使用
+        https://yourip:64294 可以查看系统的运行状态和服务部署情况
+        用系统用户登陆
+        (在安装时创建)
+
+    管理web
+        https://yourip:64297 浏览器访问这个网页就可以加载系统自带的web管理页面和入侵检测管理页面
+        用web用户登陆
+        (在安装时创建)
+
+    ssh登陆
+        ssh -l tsec -p 64295 yourip
+
+    公网收集数据
+        可以使用内网穿透工具将需要收集信息的端口转发出去，可以参考
+        https://www.izhuhn.cn/index.php/2019/05/22/%e8%87%aa%e5%bb%bangrok%e5%86%85%e7%bd%91%e7%a9%bf%e9%80%8f%e6%9c%8d%e5%8a%a1/
+
+4.1 更新
+    备份重要文件
+        请自行选择备份
+
+    执行更新命令
+        cd /opt/tpot
+        ./update.sh
